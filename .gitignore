@@ -1,0 +1,4 @@
+# Biến môi trường / secrets
+.env
+.env.*
+!.env.example
