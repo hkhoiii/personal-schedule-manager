@@ -1,4 +1,27 @@
-# Biến môi trường / secrets
+# ===== Bí mật =====
 .env
 .env.*
 !.env.example
+
+# ===== Java / Maven =====
+target/
+*.class
+*.log
+.mvn/wrapper/maven-wrapper.jar
+
+# ===== Node / Vite =====
+node_modules/
+dist/
+
+# ===== Android (nếu làm bản mobile) =====
+.gradle/
+build/
+local.properties
+*.keystore
+
+# ===== IDE / Hệ điều hành =====
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
