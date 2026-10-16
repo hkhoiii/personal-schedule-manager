@@ -3,6 +3,11 @@
 .env.*
 !.env.example
 
+# Python
+.venv/
+__pycache__/
+*.pyc
+
 # ===== Java / Maven =====
 target/
 *.class
@@ -25,3 +30,4 @@ local.properties
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+command.txt
