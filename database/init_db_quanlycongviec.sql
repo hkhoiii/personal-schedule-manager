@@ -8,6 +8,7 @@
 -- ==============================================================================
 
 -- Drop tables if exists (theo thứ tự khóa ngoại)
+DROP TABLE IF EXISTS congviecphuthuoc CASCADE;
 DROP TABLE IF EXISTS thongbao CASCADE;
 DROP TABLE IF EXISTS nhatkynangsuat CASCADE;
 DROP TABLE IF EXISTS nhatkyai CASCADE;
@@ -230,6 +231,17 @@ CREATE TABLE nhatkynangsuat (
     CONSTRAINT uq_nhatkynangsuat_ngaybaocao UNIQUE ("NguoiDungId", "NgayBaoCao")
 );
 
+-- 16. Bảng CONGVIECPHUTHUOC (Phụ thuộc giữa các công việc - đầu vào của thuật toán Kahn, tuần 3)
+-- Ý nghĩa: công việc "CongViecId" chỉ được bắt đầu SAU KHI "PhuThuocCongViecId" hoàn thành.
+-- Ví dụ: (5, 3) nghĩa là việc 5 phải chờ việc 3. Trong đồ thị: cạnh 3 -> 5.
+-- Lưu ý: CHECK chỉ chặn tự phụ thuộc; việc phát hiện vòng (A->B->A) do thuật toán Kahn ở tầng service xử lý.
+CREATE TABLE congviecphuthuoc (
+    "CongViecId" BIGINT NOT NULL REFERENCES congviec("id") ON DELETE CASCADE,
+    "PhuThuocCongViecId" BIGINT NOT NULL REFERENCES congviec("id") ON DELETE CASCADE,
+    PRIMARY KEY ("CongViecId", "PhuThuocCongViecId"),
+    CONSTRAINT ck_congviecphuthuoc_khacnhau CHECK ("CongViecId" <> "PhuThuocCongViecId")
+);
+
 -- ==============================================================================
 -- INDEXES TỐI ƯU HÓA HIỆU NĂNG TRUY VẤN
 -- ==============================================================================
@@ -240,6 +252,7 @@ CREATE INDEX idx_khoithoigian_nguoidung_thoigian ON khoithoigian("NguoiDungId", 
 CREATE INDEX idx_phientaptrung_nguoidung_batdau ON phientaptrung("NguoiDungId", "ThoiGianBatDau");
 CREATE INDEX idx_nhacnho_dagui ON nhacnho("ThoiGianNhac") WHERE "DaGui" = FALSE;
 CREATE INDEX idx_thongbao_nguoidung_dadoc ON thongbao("NguoiDungId", "DaDoc");
+CREATE INDEX idx_congviecphuthuoc_phuthuoc ON congviecphuthuoc("PhuThuocCongViecId");
 
 -- ==============================================================================
 -- DỮ LIỆU MẪU BAN ĐẦU (SEED DATA)
