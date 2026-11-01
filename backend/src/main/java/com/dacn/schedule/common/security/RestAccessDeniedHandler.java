@@ -1,0 +1,29 @@
+package com.dacn.schedule.common.security;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+
+/**
+ * Được gọi khi người dùng ĐÃ đăng nhập nhưng không đủ quyền. Chuyển cho {@code GlobalExceptionHandler}
+ * để trả lỗi {@code FORBIDDEN} (HTTP 403) đúng định dạng chung.
+ */
+@Component
+public class RestAccessDeniedHandler implements AccessDeniedHandler {
+
+    private final HandlerExceptionResolver resolver;
+
+    public RestAccessDeniedHandler(@Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver) {
+        this.resolver = resolver;
+    }
+
+    @Override
+    public void handle(HttpServletRequest request, HttpServletResponse response,
+                       AccessDeniedException accessDeniedException) {
+        resolver.resolveException(request, response, null, accessDeniedException);
+    }
+}
