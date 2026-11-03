@@ -5,7 +5,9 @@
  * <ul>
  *   <li>{@code GET /schedule?from=&to=}</li>
  *   <li>{@code GET /schedule/summary}</li>
+ *   <li>{@code POST /schedule/blocks}</li>
  *   <li>{@code PATCH /schedule/blocks/{id}}</li>
+ *   <li>{@code DELETE /schedule/blocks/{id}}</li>
  *   <li>{@code POST /schedule/generate}</li>
  *   <li>{@code POST /schedule/apply}</li>
  *   <li>{@code POST /schedule/reschedule}</li>
@@ -20,6 +22,9 @@
  * <ul>
  *   <li>Subpackage algorithm: Priority Score, tìm khung giờ trống, khóa khối cố định</li>
  *   <li>generate chỉ TẠO ĐỀ XUẤT, chỉ apply mới ghi vào lịch</li>
+ *   <li>POST /schedule/blocks: người dùng tự tạo khối (lịch học, cuộc họp...), CongViecId được để trống,
+ *       TuDongXepLich = FALSE; thuật toán xem khối này là cố định, không được dời</li>
+ *   <li>Tạo / sửa khối: kiểm tra ThoiGianBatDau &lt; ThoiGianKetThuc và không trùng giờ khối đang có (SCHEDULE_CONFLICT)</li>
  *   <li>Lỗi: SCHEDULE_CONFLICT, NO_SLOT_AVAILABLE</li>
  * </ul>
  *

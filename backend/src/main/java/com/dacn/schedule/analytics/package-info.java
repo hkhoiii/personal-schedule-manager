@@ -3,6 +3,7 @@
  *
  * <p>Endpoint (tiền tố {@code /api/v1}):
  * <ul>
+ *   <li>{@code GET /analytics/summary}</li>
  *   <li>{@code GET /analytics/by-hour}</li>
  *   <li>{@code GET /analytics/by-category}</li>
  *   <li>{@code GET /analytics/estimate-accuracy}</li>
@@ -16,6 +17,8 @@
  * <p>Cần lưu ý khi cài đặt:
  * <ul>
  *   <li>Tham số range = 7d, 30d (mặc định), 90d</li>
+ *   <li>summary: số việc hoàn thành, tỷ lệ đúng hạn, tổng phút tập trung (cho thanh thống kê StatsBar)</li>
+ *   <li>Cung cấp service cho module ai: đọc số liệu tổng hợp và ghi cột NhanXetAI (phục vụ GET /ai/insights)</li>
  * </ul>
  *
  * <p>Cấu trúc bên trong (tạo thư mục con khi cần): {@code controller}, {@code service},

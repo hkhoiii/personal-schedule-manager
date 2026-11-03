@@ -2,11 +2,21 @@
 
 ## Chạy
 
-1. Bật PostgreSQL: ở thư mục gốc dự án chạy `docker compose up -d` (cổng 5433, đọc cấu hình từ file `.env`).
-2. Đặt biến môi trường `DB_PASSWORD` (cùng giá trị với `.env`). `DB_NAME`, `DB_USERNAME`, `DB_PORT` có giá trị mặc định
-   trong `application.properties`.
-3. Trong thư mục `backend` chạy `mvn spring-boot:run`
+1. Bật Docker Desktop. Ở thư mục gốc dự án, tạo file `.env` từ `.env.example` (lần đầu) và đặt `DB_PASSWORD`.
+2. Trong thư mục `backend` chạy `mvn spring-boot:run`
    (hoặc `..\tools\apache-maven-3.9.6\bin\mvn.cmd spring-boot:run` trên Windows).
+   Ứng dụng tự chạy `docker compose` để bật PostgreSQL (cổng 5433) và tự lấy tài khoản DB từ container,
+   nên **không cần** đặt biến môi trường `DB_PASSWORD` cho bước này. Phải chạy lệnh từ thư mục `backend`
+   (đường dẫn `../docker-compose.yml` tính từ đây). Tắt ứng dụng thì PostgreSQL vẫn chạy tiếp.
+
+Lần đầu bật, PostgreSQL tự chạy `database/init_db_quanlycongviec.sql`. Script này **chỉ chạy khi volume dữ liệu còn trống**.
+Nếu database của bạn được tạo trước khi có bảng `tokenlammoi`, chạy bản vá (ở thư mục gốc, không mất dữ liệu):
+
+```
+docker exec -i psm-postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < database/patch_01_tokenlammoi.sql
+```
+
+Muốn xóa sạch và tạo lại database từ đầu: `docker compose down -v` rồi chạy lại ứng dụng (**mất toàn bộ dữ liệu**).
 
 Kiểm tra:
 
@@ -24,6 +34,9 @@ Mọi endpoint khác hiện trả `401 UNAUTHENTICATED` cho tới khi làm xong 
 mvn test -Dtest="GlobalExceptionHandlerTest,SecurityErrorFormatTest"   # không cần PostgreSQL
 mvn test                                                               # gồm cả ScheduleApplicationTests (cần PostgreSQL đang chạy)
 ```
+
+Khi chạy test, Spring Boot **không** tự bật docker compose, nên `mvn test` đầy đủ cần PostgreSQL đang chạy
+(`docker compose up -d` ở thư mục gốc) và biến môi trường `DB_PASSWORD` trùng với `.env`.
 
 ## Cấu trúc package (theo module)
 
@@ -89,3 +102,7 @@ Danh sách mã lỗi xem `ErrorCode.java`.
 - Viết `JwtAuthenticationFilter` và đăng ký vào `SecurityConfig` (trước `UsernamePasswordAuthenticationFilter`).
 - Token hết hạn: gọi `resolver.resolveException(request, response, null, new ApiException(ErrorCode.TOKEN_EXPIRED))`.
 - Viết `CustomUserDetailsService` đọc bảng `nguoidung` và **xóa** bean `placeholderUserDetailsService` trong `SecurityConfig`.
+- Refresh token lưu ở bảng `tokenlammoi` (chỉ lưu mã băm SHA-256), xoay vòng khi `/auth/refresh`, thu hồi khi `/auth/logout`.
+  Chi tiết xem `auth/package-info.java`.
+- Mật khẩu mẫu trong `init_db_quanlycongviec.sql` (`admin@gmail.com` / `1`, `demo@smarttask.ai` / `password123`)
+  **không khớp** với mã băm BCrypt đang lưu. Cần sinh lại mã băm trước khi thử đăng nhập bằng tài khoản mẫu.

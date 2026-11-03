@@ -8,6 +8,7 @@
 -- ==============================================================================
 
 -- Drop tables if exists (theo thứ tự khóa ngoại)
+DROP TABLE IF EXISTS tokenlammoi CASCADE;
 DROP TABLE IF EXISTS congviecphuthuoc CASCADE;
 DROP TABLE IF EXISTS thongbao CASCADE;
 DROP TABLE IF EXISTS nhatkynangsuat CASCADE;
@@ -242,6 +243,21 @@ CREATE TABLE congviecphuthuoc (
     CONSTRAINT ck_congviecphuthuoc_khacnhau CHECK ("CongViecId" <> "PhuThuocCongViecId")
 );
 
+-- 17. Bảng TOKENLAMMOI (Refresh token - phục vụ làm mới và thu hồi phiên đăng nhập)
+-- Access token (JWT, sống ngắn) không lưu DB; chỉ refresh token (sống dài) được lưu để có thể thu hồi.
+-- Chỉ lưu MÃ BĂM SHA-256 (dạng hex 64 ký tự) của token, không lưu token gốc: lộ DB cũng không dùng lại được.
+-- Mỗi lần POST /auth/refresh: thu hồi token cũ (ghi "ThuHoiLuc") rồi cấp token mới (rotation).
+-- POST /auth/logout: ghi "ThuHoiLuc". Token còn hiệu lực khi "ThuHoiLuc" IS NULL và "HetHanLuc" > hiện tại.
+CREATE TABLE tokenlammoi (
+    "id" BIGSERIAL PRIMARY KEY,
+    "NguoiDungId" BIGINT NOT NULL REFERENCES nguoidung("id") ON DELETE CASCADE,
+    "MaBamToken" VARCHAR(64) NOT NULL UNIQUE,
+    "HetHanLuc" TIMESTAMPTZ NOT NULL,
+    "ThuHoiLuc" TIMESTAMPTZ,                       -- NULL = còn hiệu lực
+    "ThietBi" VARCHAR(255),                        -- User-Agent lúc đăng nhập (hiển thị "đang đăng nhập ở đâu")
+    "NgayTao" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ==============================================================================
 -- INDEXES TỐI ƯU HÓA HIỆU NĂNG TRUY VẤN
 -- ==============================================================================
@@ -253,6 +269,7 @@ CREATE INDEX idx_phientaptrung_nguoidung_batdau ON phientaptrung("NguoiDungId", 
 CREATE INDEX idx_nhacnho_dagui ON nhacnho("ThoiGianNhac") WHERE "DaGui" = FALSE;
 CREATE INDEX idx_thongbao_nguoidung_dadoc ON thongbao("NguoiDungId", "DaDoc");
 CREATE INDEX idx_congviecphuthuoc_phuthuoc ON congviecphuthuoc("PhuThuocCongViecId");
+CREATE INDEX idx_tokenlammoi_nguoidung ON tokenlammoi("NguoiDungId");
 
 -- ==============================================================================
 -- DỮ LIỆU MẪU BAN ĐẦU (SEED DATA)

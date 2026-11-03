@@ -76,6 +76,9 @@ Dự án hướng đến việc xây dựng một hệ thống **Quản lý và 
 
 ### 2.1. Phân hệ Quản lý Tài khoản & Cá nhân hóa (Auth & Preferences)
 - **Đăng ký / Đăng nhập:** Xác thực qua JWT (Access Token & Refresh Token), mã hóa mật khẩu bằng BCrypt.
+  - Access Token (JWT) sống ngắn (khoảng 15 phút), không lưu CSDL. Refresh Token sống khoảng 7 ngày, lưu mã băm SHA-256 trong bảng `tokenlammoi`.
+  - Làm mới token theo cơ chế xoay vòng (rotation): mỗi refresh token chỉ dùng được một lần.
+  - Đăng xuất / đổi mật khẩu sẽ thu hồi refresh token, buộc đăng nhập lại.
 - **Quản lý Hồ sơ Cá nhân:** Cập nhật thông tin họ tên, email, ảnh đại diện (Avatar).
 - **Cấu hình thói quen sinh hoạt (User Preferences):**
   - Khung giờ làm việc cố định (Ví dụ: 08:00 - 18:00).
@@ -165,6 +168,7 @@ erDiagram
     nguoidung ||--o{ thongbao : "nhan_thong_bao"
     nguoidung ||--o{ nhatkyai : "tuong_tac"
     nguoidung ||--o{ nhatkynangsuat : "tong_hop"
+    nguoidung ||--o{ tokenlammoi : "dang_nhap"
 
     nguoidung {
         bigserial id PK
@@ -301,6 +305,14 @@ erDiagram
         numeric TyLeDungHan
         text NhanXetAI
     }
+
+    tokenlammoi {
+        bigserial id PK
+        bigint NguoiDungId FK
+        varchar MaBamToken UK
+        timestamptz HetHanLuc
+        timestamptz ThuHoiLuc
+    }
 ```
 
 ### 3.2. Đặc tả chi tiết các bảng dữ liệu (Quy chuẩn tiếng Việt)
@@ -406,6 +418,10 @@ erDiagram
 #### Bảng 13: `nhatkynangsuat` (Thống kê năng suất ngày)
 - `id` (BIGSERIAL PK), `NguoiDungId` (FK -> nguoidung), `NgayBaoCao` (DATE), `TongCongViecHoanThanh` (INT), `TongPhutTapTrung` (INT), `TyLeDungHan` (NUMERIC(5,2)), `NhanXetAI` (TEXT).
 
+#### Bảng 14: `tokenlammoi` (Refresh token - Làm mới & Thu hồi phiên đăng nhập)
+- `id` (BIGSERIAL PK), `NguoiDungId` (FK -> nguoidung), `MaBamToken` (VARCHAR(64), UNIQUE - mã băm SHA-256 của refresh token, không lưu token gốc), `HetHanLuc` (TIMESTAMPTZ), `ThuHoiLuc` (TIMESTAMPTZ, NULL = còn hiệu lực), `ThietBi` (VARCHAR), `NgayTao` (TIMESTAMPTZ).
+- Lý do cần bảng: JWT không lưu trạng thái nên không thể thu hồi; lưu refresh token cho phép đăng xuất thật sự, thu hồi mọi phiên khi đổi mật khẩu và xoay vòng token khi làm mới.
+
 ### 3.3. Các chỉ mục (Indexes) và chiến lược tối ưu hóa
 1. `idx_congviec_nguoidung_trangthai` trên `("NguoiDungId", "TrangThai")`: Tối ưu hóa truy vấn lấy danh sách việc cần làm (`TODO`, `IN_PROGRESS`).
 2. `idx_congviec_nguoidung_hanchot` trên `("NguoiDungId", "HanChot")`: Hỗ trợ tìm kiếm các việc sắp đến hạn hoặc quá hạn nhanh chóng.
@@ -471,7 +487,7 @@ sequenceDiagram
     participant AI as Google Gemini API
 
     User->>Client: Bấm nút "Tự động lập lịch cho ngày mai"
-    Client->>Backend: POST /api/schedule/auto-generate (date, preferences)
+    Client->>Backend: POST /api/v1/schedule/generate (date, preferences)
     Backend->>DB: Lấy UserPreferences (Giờ làm việc, Giờ vàng, Buffer time)
     Backend->>DB: Lấy danh sách Fixed Events & Lịch đã có trong ngày
     Backend->>DB: Lấy danh sách Tasks chưa xếp lịch (Sort theo Priority, Deadline)
@@ -484,40 +500,83 @@ sequenceDiagram
         Backend->>Backend: Sắp xếp theo thuật toán Greedy Interval Scheduling
     end
 
-    Backend->>DB: Lưu danh sách TIME_BLOCKS mới (is_auto_scheduled = true)
-    Backend->>DB: Ghi log vào AI_SCHEDULING_LOGS
-    Backend-->>Client: Trả về kết quả Lịch trình 200 OK (Danh sách Time Blocks)
-    Client-->>User: Hiển thị thời gian biểu trực quan trên Calendar
+    Backend->>DB: Ghi log vào nhatkyai (LoaiHanhDong = AUTO_SCHEDULE)
+    Backend-->>Client: Trả về ĐỀ XUẤT lịch trình 200 OK (chưa ghi vào lịch)
+    Client-->>User: Hiển thị bản xem trước trên Calendar
+    User->>Client: Bấm "Áp dụng"
+    Client->>Backend: POST /api/v1/schedule/apply (danh sách khối đã chọn)
+    Backend->>DB: Lưu các khoithoigian mới (TuDongXepLich = TRUE)
+    Backend-->>Client: 200 OK (danh sách khối thời gian đã lưu)
+    Client-->>User: Hiển thị thời gian biểu chính thức trên Calendar
 ```
 
 ### 4.3. Đặc tả các RESTful API cốt lõi
 
-#### Nhóm 1: Xác thực & Người dùng (`/api/auth`, `/api/users`)
-- `POST /api/auth/register`: Đăng ký tài khoản mới.
-- `POST /api/auth/login`: Đăng nhập, nhận JWT Token.
-- `GET /api/users/profile`: Lấy thông tin cá nhân của người dùng hiện tại.
-- `PUT /api/users/preferences`: Cập nhật cấu hình thói quen làm việc (giờ làm, giờ vàng, buffer).
+> **Quy ước chung:**
+> - Mọi đường dẫn có tiền tố **`/api/v1`** (khai báo một lần trong `ApiPaths.V1`, đổi phiên bản chỉ sửa một chỗ).
+> - Trừ nhóm `/auth/**`, mọi endpoint yêu cầu header `Authorization: Bearer <access token>`.
+> - Danh sách dưới đây khớp với phần "Endpoint" trong file `package-info.java` của từng module backend; tài liệu chi tiết (tham số, ví dụ) xem trực tiếp tại Swagger UI `http://localhost:8080/swagger-ui.html`.
+> - Lỗi luôn trả cùng một định dạng JSON (`status`, `code`, `message`, `details`); danh sách mã lỗi xem `ErrorCode.java`.
 
-#### Nhóm 2: Quản lý Công việc & Danh mục (`/api/tasks`, `/api/categories`)
-- `GET /api/tasks`: Lấy danh sách công việc (hỗ trợ lọc theo `status`, `category_id`, `priority`, `due_date`).
-- `POST /api/tasks`: Tạo công việc mới.
-- `PUT /api/tasks/{id}`: Cập nhật thông tin công việc.
-- `PATCH /api/tasks/{id}/status`: Cập nhật nhanh trạng thái (`COMPLETED`, `IN_PROGRESS`).
-- `DELETE /api/tasks/{id}`: Xóa công việc.
-- `POST /api/tasks/{id}/subtasks`: Thêm checklist con vào công việc.
+#### Nhóm 1: Xác thực (`/api/v1/auth`) — module `auth`
+- `POST /api/v1/auth/register`: Đăng ký tài khoản mới.
+- `POST /api/v1/auth/login`: Đăng nhập, nhận Access Token (JWT) và Refresh Token.
+- `POST /api/v1/auth/refresh`: Đổi Refresh Token lấy cặp token mới (token cũ bị thu hồi — rotation).
+- `POST /api/v1/auth/logout`: Đăng xuất, thu hồi Refresh Token.
 
-#### Nhóm 3: Trợ lý AI & Lập lịch tự động (`/api/ai`, `/api/schedule`)
-- `POST /api/ai/parse-task`: Phân tích câu nói/văn bản tự nhiên thành công việc có cấu trúc.
-- `POST /api/ai/breakdown-task`: Phân rã mục tiêu lớn thành các subtask bằng Gemini API.
-- `POST /api/schedule/auto-generate`: Chạy thuật toán tự động xếp các task chưa lập lịch vào ngày chỉ định.
-- `POST /api/schedule/reschedule-conflicts`: Tự động dời các việc bị trễ hoặc xung đột.
-- `GET /api/schedule/time-blocks`: Lấy danh sách khối thời gian hiển thị lên Calendar.
+#### Nhóm 2: Người dùng & Cấu hình cá nhân (`/api/v1/users`, `/api/v1/preferences`) — module `user`
+- `GET /api/v1/users/me`: Lấy thông tin cá nhân của người dùng hiện tại.
+- `PUT /api/v1/users/me`: Cập nhật họ tên, số điện thoại, ảnh đại diện.
+- `PUT /api/v1/users/me/password`: Đổi mật khẩu (thu hồi mọi Refresh Token đang có).
+- `GET /api/v1/preferences`: Lấy cấu hình thói quen làm việc.
+- `PUT /api/v1/preferences`: Cập nhật cấu hình thói quen làm việc (giờ làm, giờ vàng, buffer, Pomodoro).
 
-#### Nhóm 4: Pomodoro & Thống kê (`/api/pomodoro`, `/api/analytics`)
-- `POST /api/pomodoro/start`: Bắt đầu phiên tập trung mới (liên kết với Task ID).
-- `POST /api/pomodoro/complete`: Kết thúc phiên tập trung và ghi nhận số phút thực tế.
-- `GET /api/analytics/summary`: Lấy dữ liệu tổng hợp số việc đã hoàn thành, tỷ lệ đúng hạn, tổng phút tập trung.
-- `GET /api/analytics/ai-insights`: Lấy báo cáo phân tích nhận xét thói quen làm việc từ Gemini AI.
+#### Nhóm 3: Danh mục & Công việc (`/api/v1/categories`, `/api/v1/tasks`) — module `category`, `task`
+- `GET /api/v1/categories`, `POST /api/v1/categories`, `PUT /api/v1/categories/{id}`, `DELETE /api/v1/categories/{id}`: Quản lý nhóm công việc (không xóa được nhóm còn công việc — `CATEGORY_IN_USE`).
+- `GET /api/v1/tasks`: Lấy danh sách công việc (hỗ trợ lọc theo `status`, `category_id`, `priority`, `due_date`).
+- `GET /api/v1/tasks/summary`: Đếm số công việc theo trạng thái.
+- `POST /api/v1/tasks`: Tạo công việc mới.
+- `GET /api/v1/tasks/{id}`: Xem chi tiết một công việc (kèm công việc con, thẻ, phụ thuộc). Công việc của người khác trả `404`.
+- `PUT /api/v1/tasks/{id}`: Cập nhật thông tin công việc.
+- `PATCH /api/v1/tasks/{id}/status`: Cập nhật nhanh trạng thái (`COMPLETED`, `IN_PROGRESS`).
+- `DELETE /api/v1/tasks/{id}`: Xóa công việc.
+- `POST /api/v1/tasks/{id}/subtasks`: Thêm checklist con vào công việc.
+- `POST /api/v1/tasks/batch`: Tạo nhiều công việc cùng lúc (dùng sau khi người dùng xác nhận kết quả AI).
+
+#### Nhóm 4: Lịch & Lập lịch tự động (`/api/v1/schedule`) — module `schedule`
+- `GET /api/v1/schedule?from=&to=`: Lấy các khối thời gian trong khoảng ngày để hiển thị lên Calendar.
+- `GET /api/v1/schedule/summary`: Tóm tắt lịch (số khối, tổng thời lượng) trong khoảng ngày.
+- `POST /api/v1/schedule/blocks`: Người dùng tự tạo khối thời gian (lịch học, cuộc họp...). Khối tự tạo là **cố định**, thuật toán không được dời. Trùng giờ trả `SCHEDULE_CONFLICT`.
+- `PATCH /api/v1/schedule/blocks/{id}`: Sửa giờ / trạng thái một khối (kéo thả trên Calendar).
+- `DELETE /api/v1/schedule/blocks/{id}`: Xóa một khối thời gian.
+- `POST /api/v1/schedule/generate`: Chạy thuật toán xếp các công việc chưa có lịch, **chỉ trả đề xuất**, chưa ghi vào lịch.
+- `POST /api/v1/schedule/apply`: Ghi các khối đề xuất mà người dùng đã chấp nhận vào lịch.
+- `POST /api/v1/schedule/reschedule`: Tự động dời các việc bị trễ hoặc xung đột.
+
+#### Nhóm 5: Trợ lý AI (`/api/v1/ai`) — module `ai`
+- `POST /api/v1/ai/parse-tasks`: Phân tích câu nói/văn bản tự nhiên thành một hoặc nhiều công việc có cấu trúc (chỉ đề xuất).
+- `POST /api/v1/ai/breakdown-task`: Phân rã mục tiêu lớn thành các công việc con đề xuất bằng Gemini API.
+- `GET /api/v1/ai/insights`: Nhận xét thói quen làm việc từ Gemini AI dựa trên số liệu thống kê; kết quả được lưu và dùng lại trong ngày.
+
+#### Nhóm 6: Tập trung Pomodoro (`/api/v1/tasks/{id}/...`) — module `focus`
+- `POST /api/v1/tasks/{id}/start`: Bắt đầu phiên tập trung cho một công việc.
+- `POST /api/v1/tasks/{id}/complete`: Kết thúc phiên tập trung và cộng số phút thực tế vào công việc.
+
+#### Nhóm 7: Thống kê (`/api/v1/analytics`) — module `analytics`
+- `GET /api/v1/analytics/summary`: Số việc đã hoàn thành, tỷ lệ đúng hạn, tổng phút tập trung (thanh StatsBar).
+- `GET /api/v1/analytics/by-hour`: Năng suất theo khung giờ trong ngày.
+- `GET /api/v1/analytics/by-category`: Phân bổ thời gian theo danh mục.
+- `GET /api/v1/analytics/estimate-accuracy`: Độ chính xác giữa thời lượng ước tính và thực tế.
+- Tham số chung `range` = `7d`, `30d` (mặc định), `90d`.
+
+#### Nhóm 8: Thông báo (`/api/v1/notifications`) — module `notification`
+- `GET /api/v1/notifications`: Danh sách thông báo.
+- `PATCH /api/v1/notifications/{id}/read`: Đánh dấu một thông báo đã đọc.
+- `PATCH /api/v1/notifications/read-all`: Đánh dấu tất cả đã đọc.
+- `WebSocket /ws/notifications`: Đẩy thông báo thời gian thực.
+
+#### Nhóm 9: Hệ thống (`/api/v1/system`) — module `system`
+- `GET /api/v1/system/ping`: Kiểm tra máy chủ còn hoạt động (không cần đăng nhập).
 
 ---
 
@@ -607,7 +666,8 @@ d:\DACN_QUANLYCONGVIECCANHAN\
 │   └── settings.gradle.kts              # Khai báo modules dự án Android
 │
 ├── database\                            # Cơ sở dữ liệu
-│   └── init_db_quanlycongviec.sql       # Script khởi tạo 13 bảng & Seed data PostgreSQL 17
+│   ├── init_db_quanlycongviec.sql       # Script khởi tạo 18 bảng & Seed data PostgreSQL 17
+│   └── patch_01_tokenlammoi.sql         # Bản vá thêm bảng tokenlammoi cho database tạo từ trước
 │
 ├── tools\                               # Bộ công cụ di động (Kế thừa từ dự án mẫu)
 │   ├── apache-maven-3.9.6\              # Apache Maven 3.9.6 portable
@@ -620,29 +680,30 @@ d:\DACN_QUANLYCONGVIECCANHAN\
 
 ### 5.2. Hướng dẫn khởi chạy và vận hành hệ thống
 
-#### Bước 1: Khởi tạo Cơ sở Dữ liệu PostgreSQL 17
-1. Đảm bảo dịch vụ PostgreSQL đang chạy trên cổng `5432`.
-2. Tạo database mới:
-   ```sql
-   CREATE DATABASE quanlycongviec_db;
-   ```
-3. Chạy script tạo bảng và dữ liệu mẫu:
-   ```bash
-   psql -U postgres -d quanlycongviec_db -f "d:\DACN_QUANLYCONGVIECCANHAN\database\init_db_quanlycongviec.sql"
-   ```
-   *(Mật khẩu PostgreSQL: `xem file .env` như đã ghi chú trong `command.txt`)*
+#### Bước 1: Chuẩn bị môi trường và Cơ sở Dữ liệu PostgreSQL 17 (Docker)
+1. Cài và bật **Docker Desktop**, **JDK 21**, **Maven** (hoặc dùng Maven có sẵn trong `tools`).
+2. Ở thư mục gốc dự án, tạo file `.env` từ `.env.example` và điền `DB_PASSWORD`, `JWT_SECRET`, `GEMINI_API_KEY`.
+3. PostgreSQL chạy trong container `psm-postgres` (image `postgres:17`, cổng máy **5433**). Không cần tự tạo database:
+   lần đầu container khởi động sẽ tự chạy `database/init_db_quanlycongviec.sql` (tạo bảng và dữ liệu mẫu).
+   - Script khởi tạo **chỉ chạy khi volume dữ liệu còn trống**. Nếu database đã được tạo từ trước khi có bảng
+     `tokenlammoi`, chạy bản vá (không mất dữ liệu):
+     ```bash
+     docker exec -i psm-postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < database/patch_01_tokenlammoi.sql
+     ```
+   - Muốn tạo lại database từ đầu: `docker compose down -v` (**xóa toàn bộ dữ liệu**).
 
-#### Bước 2: Chạy Backend (Spring Boot 3)
-Sử dụng bộ công cụ Maven sẵn có trong thư mục `tools`:
+#### Bước 2: Chạy Backend (Spring Boot 4, Java 21)
 ```powershell
-cd d:\DACN_QUANLYCONGVIECCANHAN\backend
+cd backend
+mvn spring-boot:run
+# hoặc dùng Maven trong thư mục tools:
 ..\tools\apache-maven-3.9.6\bin\mvn.cmd spring-boot:run
 ```
-- Backend sẽ khởi động tại địa chỉ: `http://localhost:8080/api`
-- Đừng quên thay thế khóa API của Google trong `application.properties`:
-  ```properties
-  gemini.api.key=AIzaSy...YOUR_ACTUAL_KEY_HERE
-  ```
+- Ứng dụng tự bật container PostgreSQL bằng `docker compose` (thư viện `spring-boot-docker-compose`) và tự lấy tài khoản DB từ container. Phải chạy lệnh trong thư mục `backend`.
+- Kiểm tra:
+  - `http://localhost:8080/api/v1/system/ping`: máy chủ còn hoạt động.
+  - `http://localhost:8080/swagger-ui.html`: tài liệu API và thử endpoint trực tiếp.
+- Chi tiết (chạy test, cấu trúc module, quy ước viết endpoint) xem `backend/README.md`.
 
 #### Bước 3: Chạy Web Frontend (React + Vite)
 Sử dụng bộ công cụ Node.js sẵn có trong thư mục `tools`:

@@ -35,6 +35,7 @@ erDiagram
     nguoidung ||--o{ thongbao : "nhan"
     nguoidung ||--o{ nhatkyai : "tuong tac"
     nguoidung ||--o{ nhatkynangsuat : "tong ket"
+    nguoidung ||--o{ tokenlammoi : "dang nhap"
 ```
 
 ---
@@ -296,6 +297,28 @@ Cung cấp số liệu cho thanh thống kê dưới đáy màn hình (**StatsBa
 | `NhanXetAI` | `TEXT` | NULL | NULL | Nhận xét và khuyến nghị ngắn của AI gửi cho người dùng mỗi cuối ngày. |
 | `NgayTao` | `TIMESTAMPTZ` | NOT NULL | `CURRENT_TIMESTAMP` | Thời điểm tổng hợp dữ liệu. |
 *(Ràng buộc duy nhất: `CONSTRAINT uq_nhatkynangsuat_ngaybaocao UNIQUE ("NguoiDungId", "NgayBaoCao")`)*
+
+---
+
+### 2.15. Bảng `tokenlammoi` (Refresh token - Làm mới & Thu hồi phiên đăng nhập)
+Phục vụ cơ chế xác thực 2 loại token: **Access Token** (JWT, sống ngắn khoảng 15 phút, **không lưu CSDL**) và **Refresh Token** (sống khoảng 7 ngày, **lưu tại bảng này**). Nhờ lưu refresh token, hệ thống có thể **thu hồi** phiên đăng nhập khi người dùng đăng xuất hoặc đổi mật khẩu — điều mà JWT thuần túy (không lưu trạng thái) không làm được.
+
+| Tên trường | Kiểu dữ liệu | Ràng buộc | Giá trị mặc định | Giải thích ý nghĩa & Nghiệp vụ |
+| :--- | :--- | :--- | :--- | :--- |
+| `id` | `BIGSERIAL` | PRIMARY KEY | Tự tăng | Khóa chính bản ghi token. |
+| `NguoiDungId` | `BIGINT` | NOT NULL, FK | | Người sở hữu phiên đăng nhập. Tự xóa khi user bị xóa (`ON DELETE CASCADE`). |
+| `MaBamToken` | `VARCHAR(64)` | NOT NULL, UNIQUE | | Mã băm **SHA-256** (hex) của refresh token. Không lưu token gốc nên dù lộ CSDL cũng không dùng lại được. |
+| `HetHanLuc` | `TIMESTAMPTZ` | NOT NULL | | Thời điểm token hết hạn. |
+| `ThuHoiLuc` | `TIMESTAMPTZ` | NULL | NULL | Thời điểm token bị thu hồi (đăng xuất, đã đổi sang token mới, đổi mật khẩu). `NULL` = còn hiệu lực. |
+| `ThietBi` | `VARCHAR(255)` | NULL | NULL | Thông tin trình duyệt / thiết bị (User-Agent) lúc đăng nhập. |
+| `NgayTao` | `TIMESTAMPTZ` | NOT NULL | `CURRENT_TIMESTAMP` | Thời điểm cấp token. |
+
+**Luồng nghiệp vụ:**
+- **Đăng nhập (`POST /api/v1/auth/login`):** cấp access token + refresh token, lưu mã băm refresh token vào bảng.
+- **Làm mới (`POST /api/v1/auth/refresh`):** token hợp lệ khi `ThuHoiLuc IS NULL` và `HetHanLuc` > hiện tại. Hệ thống ghi `ThuHoiLuc` cho token cũ rồi cấp cặp token mới (**rotation** — token bị đánh cắp chỉ dùng được một lần).
+- **Đăng xuất (`POST /api/v1/auth/logout`):** ghi `ThuHoiLuc` cho refresh token gửi lên.
+
+*(Chỉ mục: `idx_tokenlammoi_nguoidung ("NguoiDungId")` — thu hồi nhanh toàn bộ token của một người dùng khi đổi mật khẩu.)*
 
 ---
 
