@@ -2,12 +2,16 @@
 
 ## Chạy
 
-1. Bật Docker Desktop. Ở thư mục gốc dự án, tạo file `.env` từ `.env.example` (lần đầu) và đặt `DB_PASSWORD`.
+1. Bật Docker Desktop. Ở thư mục gốc dự án, tạo file `.env` từ `.env.example` (lần đầu), đặt `DB_PASSWORD`
+   và `JWT_SECRET` (tạo bằng `openssl rand -base64 48` trong Git Bash; giá trị mẫu trong `.env.example` sẽ bị từ chối).
 2. Trong thư mục `backend` chạy `mvn spring-boot:run`
    (hoặc `..\tools\apache-maven-3.9.6\bin\mvn.cmd spring-boot:run` trên Windows).
-   Ứng dụng tự chạy `docker compose` để bật PostgreSQL (cổng 5433) và tự lấy tài khoản DB từ container,
-   nên **không cần** đặt biến môi trường `DB_PASSWORD` cho bước này. Phải chạy lệnh từ thư mục `backend`
+   Ứng dụng tự chạy `docker compose` để bật PostgreSQL (cổng 5433). Phải chạy lệnh từ thư mục `backend`
    (đường dẫn `../docker-compose.yml` tính từ đây). Tắt ứng dụng thì PostgreSQL vẫn chạy tiếp.
+
+Ứng dụng tự đọc file `.env` ở thư mục gốc (`spring.config.import` trong `application.properties`), nên **không cần**
+tự đặt biến môi trường. Biến môi trường thật của hệ điều hành (nếu có) được ưu tiên hơn `.env`.
+Thiếu hoặc sai `JWT_SECRET` thì ứng dụng dừng ngay lúc khởi động và báo rõ lý do.
 
 Lần đầu bật, PostgreSQL tự chạy `database/init_db_quanlycongviec.sql`. Script này **chỉ chạy khi volume dữ liệu còn trống**.
 Nếu database của bạn được tạo trước khi có bảng `tokenlammoi`, chạy bản vá (ở thư mục gốc, không mất dữ liệu):
@@ -26,7 +30,7 @@ Kiểm tra:
 | http://localhost:8080/swagger-ui.html | Giao diện Swagger, thử endpoint trực tiếp |
 | http://localhost:8080/v3/api-docs | Tài liệu OpenAPI dạng JSON (dùng để sinh client sau này) |
 
-Mọi endpoint khác hiện trả `401 UNAUTHENTICATED` cho tới khi làm xong phần Xác thực (JWT).
+Mọi endpoint khác cần access token (xem mục Xác thực bên dưới).
 
 ## Test
 
@@ -36,7 +40,7 @@ mvn test                                                               # gồm c
 ```
 
 Khi chạy test, Spring Boot **không** tự bật docker compose, nên `mvn test` đầy đủ cần PostgreSQL đang chạy
-(`docker compose up -d` ở thư mục gốc) và biến môi trường `DB_PASSWORD` trùng với `.env`.
+(`docker compose up -d` ở thư mục gốc). Mật khẩu DB và `JWT_SECRET` vẫn được đọc tự động từ `.env`.
 
 ## Cấu trúc package (theo module)
 
@@ -97,12 +101,23 @@ Phản hồi lỗi luôn có dạng:
 `details` chỉ có khi lỗi gắn với từng trường. Lỗi 500 không bao giờ lộ chi tiết nội bộ (chi tiết nằm trong log).
 Danh sách mã lỗi xem `ErrorCode.java`.
 
-## Việc cần làm ở phần Xác thực (module `auth`)
+## Xác thực (JWT)
 
-- Viết `JwtAuthenticationFilter` và đăng ký vào `SecurityConfig` (trước `UsernamePasswordAuthenticationFilter`).
-- Token hết hạn: gọi `resolver.resolveException(request, response, null, new ApiException(ErrorCode.TOKEN_EXPIRED))`.
-- Viết `CustomUserDetailsService` đọc bảng `nguoidung` và **xóa** bean `placeholderUserDetailsService` trong `SecurityConfig`.
-- Refresh token lưu ở bảng `tokenlammoi` (chỉ lưu mã băm SHA-256), xoay vòng khi `/auth/refresh`, thu hồi khi `/auth/logout`.
-  Chi tiết xem `auth/package-info.java`.
-- Mật khẩu mẫu trong `init_db_quanlycongviec.sql` (`admin@gmail.com` / `1`, `demo@smarttask.ai` / `password123`)
-  **không khớp** với mã băm BCrypt đang lưu. Cần sinh lại mã băm trước khi thử đăng nhập bằng tài khoản mẫu.
+| Endpoint | Ý nghĩa |
+| --- | --- |
+| `POST /api/v1/auth/register` | Đăng ký (201) |
+| `POST /api/v1/auth/login` | Trả `accessToken` (JWT, 15 phút) + `refreshToken` (7 ngày) |
+| `POST /api/v1/auth/refresh` | Đổi refresh token lấy cặp mới; token cũ bị thu hồi (dùng lại token cũ: thu hồi mọi phiên) |
+| `POST /api/v1/auth/logout` | Thu hồi refresh token (204) |
+| `GET /api/v1/users/me` | Thông tin tài khoản đang đăng nhập (cần token) |
+
+- Mở không cần token: `/api/v1/auth/**`, Swagger, `/api/v1/system/**`. Mọi đường dẫn khác (kể cả `/actuator/**`) cần token.
+- Lỗi: thiếu token `401 UNAUTHENTICATED`; token hết hạn `401 TOKEN_EXPIRED` (client gọi `/auth/refresh`);
+  token giả `401 UNAUTHENTICATED` "Token không hợp lệ"; thiếu quyền `403 FORBIDDEN`. Tất cả cùng định dạng `ApiError`.
+- Lấy người dùng hiện tại trong controller: tham số `@AuthenticationPrincipal AuthenticatedUser currentUser`
+  (`common.security`), dùng `currentUser.userId()`. Giới hạn theo vai trò: `@PreAuthorize("hasRole('ADMIN')")`.
+- Thành phần: `JwtService`, `JwtAuthenticationFilter`, `AccountUserDetailsService` (`auth/security`),
+  `AuthService`, `RefreshTokenService` (`auth/service`), `SecurityConfig` (`common/config`).
+- Khi test, khóa JWT lấy từ `src/test/resources/config/application.properties` (khóa cố định chỉ dùng cho test).
+- Thử bằng Postman: import `postman/personal-schedule-manager.postman_collection.json` (ở thư mục gốc) rồi chạy
+  từ trên xuống; đăng nhập xong biến `{{token}}` tự được điền.

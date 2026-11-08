@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.dacn.schedule.auth.security.JwtService;
 import com.dacn.schedule.common.config.ClockConfig;
 import com.dacn.schedule.common.config.SecurityConfig;
 import com.dacn.schedule.common.exception.GlobalExceptionHandler;
@@ -22,7 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * (không phải trang đăng nhập HTML hay thân rỗng), CORS cho frontend Vite.
  */
 @WebMvcTest(controllers = SystemController.class)
-@Import({SecurityConfig.class, RestAuthenticationEntryPoint.class, RestAccessDeniedHandler.class,
+@Import({SecurityConfig.class, JwtService.class, RestAuthenticationEntryPoint.class, RestAccessDeniedHandler.class,
         GlobalExceptionHandler.class, ClockConfig.class})
 class SecurityErrorFormatTest {
 

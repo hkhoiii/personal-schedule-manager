@@ -1,0 +1,331 @@
+{
+  "info": {
+    "name": "Nhịp - Personal Schedule Manager API",
+    "description": "Bộ request kiểm thử phần Xác thực (JWT).\n\nCách dùng:\n1. Chạy backend (`mvn spring-boot:run` trong thư mục backend).\n2. Import file này vào Postman.\n3. Chạy lần lượt từ trên xuống, hoặc bấm **Run collection** để chạy hết.\n\nBiến của collection (tab Variables):\n- `baseUrl`: địa chỉ API, mặc định http://localhost:8080/api/v1\n- `token`: access token (JWT). **Tự điền** sau khi gọi Đăng nhập / Làm mới token.\n- `refreshToken`: tự điền sau khi gọi Đăng nhập / Làm mới token.\n- `email`, `password`: tài khoản dùng để thử. Request Đăng ký tự sinh email mới mỗi lần chạy.\n\nMọi request dùng kiểu xác thực **Bearer Token = {{token}}** (đặt ở cấp collection); các request công khai đặt No Auth.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{token}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "token", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "email", "value": "postman.test@gmail.com" },
+    { "key": "password", "value": "matkhau123" }
+  ],
+  "item": [
+    {
+      "name": "0. Hệ thống - Ping",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "GET",
+        "url": "{{baseUrl}}/system/ping",
+        "description": "Kiểm tra máy chủ đang chạy. Không cần token."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 và status UP', () => {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().status).to.eql('UP');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Đăng ký",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"fullName\": \"Người Dùng Postman\"\n}"
+        },
+        "description": "Tạo tài khoản mới. Script trước khi gửi tự sinh email mới (postman.<thời gian>@gmail.com) để chạy lại nhiều lần không bị trùng."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('email', 'postman.' + Date.now() + '@gmail.com');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created, có ROLE_USER, không trả mật khẩu', () => {",
+              "    pm.response.to.have.status(201);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.email).to.eql(pm.collectionVariables.get('email'));",
+              "    pm.expect(body.roles).to.include('ROLE_USER');",
+              "    pm.expect(body).to.not.have.property('password');",
+              "    pm.expect(body).to.not.have.property('passwordHash');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Đăng nhập (lưu {{token}})",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+        },
+        "description": "Đăng nhập. Script sau khi nhận phản hồi lưu accessToken vào biến {{token}} và refreshToken vào {{refreshToken}}."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 và có cặp token', () => {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.tokenType).to.eql('Bearer');",
+              "    pm.expect(body.accessToken.split('.')).to.have.lengthOf(3);",
+              "    pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+              "    pm.collectionVariables.set('token', body.accessToken);",
+              "    pm.collectionVariables.set('refreshToken', body.refreshToken);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Tài khoản hiện tại - có token",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/users/me",
+        "description": "Dùng Bearer {{token}} kế thừa từ collection. Phải trả đúng thông tin tài khoản vừa đăng nhập."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 và đúng tài khoản đang đăng nhập', () => {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.email).to.eql(pm.collectionVariables.get('email'));",
+              "    pm.expect(body.fullName).to.eql('Người Dùng Postman');",
+              "    pm.expect(body.roles).to.include('ROLE_USER');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Tài khoản hiện tại - KHÔNG có token (401)",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "GET",
+        "url": "{{baseUrl}}/users/me",
+        "description": "Không gửi token: phải bị chặn với lỗi 401 JSON code UNAUTHENTICATED."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('401 UNAUTHENTICATED dạng JSON chung', () => {",
+              "    pm.response.to.have.status(401);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.code).to.eql('UNAUTHENTICATED');",
+              "    pm.expect(body.status).to.eql(401);",
+              "    pm.expect(body.path).to.eql('/api/v1/users/me');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Tài khoản hiện tại - token sai (401)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.chu-ky-gia", "type": "string" }]
+        },
+        "method": "GET",
+        "url": "{{baseUrl}}/users/me",
+        "description": "Token giả (chữ ký sai): 401 UNAUTHENTICATED, thông báo 'Token không hợp lệ'."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('401 token không hợp lệ', () => {",
+              "    pm.response.to.have.status(401);",
+              "    pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED');",
+              "    pm.expect(pm.response.json().message).to.include('Token không hợp lệ');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Làm mới token (cập nhật {{token}})",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/refresh",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+        },
+        "description": "Đổi refresh token lấy cặp mới. Refresh token cũ bị thu hồi; script lưu cặp mới vào {{token}} / {{refreshToken}}."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 và cặp token mới', () => {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.refreshToken).to.not.eql(pm.collectionVariables.get('refreshToken'));",
+              "    pm.collectionVariables.set('token', body.accessToken);",
+              "    pm.collectionVariables.set('refreshToken', body.refreshToken);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Tài khoản hiện tại - token mới",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/users/me",
+        "description": "Access token mới sau khi làm mới vẫn dùng được."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 với token mới', () => {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().email).to.eql(pm.collectionVariables.get('email'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Đăng xuất",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/logout",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+        },
+        "description": "Thu hồi refresh token. Trả 204 không có nội dung."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Làm mới sau khi đăng xuất (401)",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/refresh",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+        },
+        "description": "Refresh token đã thu hồi khi đăng xuất: 401 TOKEN_EXPIRED."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('401 TOKEN_EXPIRED', () => {",
+              "    pm.response.to.have.status(401);",
+              "    pm.expect(pm.response.json().code).to.eql('TOKEN_EXPIRED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Đăng nhập sai mật khẩu (401)",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"saimatkhau999\"\n}"
+        },
+        "description": "Sai mật khẩu: 401 BAD_CREDENTIALS (cùng thông báo với email không tồn tại)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('401 BAD_CREDENTIALS', () => {",
+              "    pm.response.to.have.status(401);",
+              "    pm.expect(pm.response.json().code).to.eql('BAD_CREDENTIALS');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
